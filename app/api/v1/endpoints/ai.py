@@ -2,6 +2,7 @@ from typing import List, Any
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
+import logging
 from app.core import database
 from app.models.book import Book
 from app.models.review import Review
@@ -9,6 +10,7 @@ from app.services import ai_service
 from app.api import deps
 from app.models.user import User
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.post("/generate-summary")
@@ -16,8 +18,24 @@ async def generate_summary(
     text: str = Body(..., embed=True),
     current_user: User = Depends(deps.get_current_user)
 ):
-    summary = await ai_service.generate_book_summary(text)
-    return {"summary": summary}
+    """Generate AI summary from text (requires authentication)."""
+    try:
+        if not text or not text.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Text cannot be empty"
+            )
+        summary = await ai_service.generate_book_summary(text)
+        logger.info(f"Summary generated for user {current_user.email}")
+        return {"summary": summary}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating summary: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while generating summary"
+        )
 
 @router.post("/books/{book_id}/generate-summary")
 async def generate_and_save_book_summary(
@@ -59,26 +77,40 @@ async def generate_and_save_book_summary(
 @router.get("/books/{book_id}/summary")
 async def get_book_summary_and_rating(
     book_id: int,
-    db: AsyncSession = Depends(database.get_db)
+    db: AsyncSession = Depends(database.get_db),
+    current_user: User = Depends(deps.get_current_user)  # ADDED AUTHENTICATION
 ):
-    # Get book
-    result = await db.execute(select(Book).where(Book.id == book_id))
-    book = result.scalars().first()
-    if not book:
-        raise HTTPException(status_code=404, detail="Book not found")
-    
-    # Get aggregated rating
-    rating_result = await db.execute(
-        select(func.avg(Review.rating)).where(Review.book_id == book_id)
-    )
-    avg_rating = rating_result.scalar()
-    
-    return {
-        "id": book.id,
-        "title": book.title,
-        "summary": book.summary,
-        "average_rating": avg_rating or 0.0
-    }
+    """Get book summary and rating (requires authentication)."""
+    try:
+        # Get book
+        result = await db.execute(select(Book).where(Book.id == book_id))
+        book = result.scalars().first()
+        if not book:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Book with ID {book_id} not found"
+            )
+        
+        # Get aggregated rating
+        rating_result = await db.execute(
+            select(func.avg(Review.rating)).where(Review.book_id == book_id)
+        )
+        avg_rating = rating_result.scalar()
+        
+        return {
+            "id": book.id,
+            "title": book.title,
+            "summary": book.summary,
+            "average_rating": float(avg_rating) if avg_rating else 0.0
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching book summary {book_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="An error occurred while fetching book summary"
+        )
 
 @router.get("/recommendations")
 async def get_recommendations(

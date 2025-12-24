@@ -8,13 +8,18 @@ services:
     volumes:
       - .:/app
     environment:
+      # Database Configuration
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/book_db
-      - SECRET_KEY=changethis_secret_key_for_jwt_encoding
+
+      # Security Configuration (REQUIRED: Set these in your environment or .env file)
+      - SECRET_KEY=${SECRET_KEY}
       - ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=30
-      # Add your LLM API keys here
+
+      # LLM/AI Configuration (Optional: Required only for AI features)
       - LLM_API_KEY=${LLM_API_KEY}
       - LLM_BASE_URL=${LLM_BASE_URL}
+      - LLM_MODEL=${LLM_MODEL:-llama-3.3-70b-versatile}
     depends_on:
       - db
 
